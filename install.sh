@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
-mkdir Debug
+if [ ! -e Debug ]; then
+    mkdir Debug
+fi
 cd Debug
 cmake .. -DCMAKE_BUILD_TYPE=Debug ..
 cd ..
