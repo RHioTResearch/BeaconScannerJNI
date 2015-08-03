@@ -6,4 +6,4 @@ fi
 cd Debug
 cmake .. -DCMAKE_BUILD_TYPE=Debug ..
 cd ..
-cmake --build Debug --target scannerJni
+cmake --build Debug --target install

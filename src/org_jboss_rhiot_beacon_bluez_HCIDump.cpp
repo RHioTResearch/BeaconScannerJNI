@@ -1,5 +1,5 @@
 #include <string.h>
-#include "org_jboss_summit2015_beacon_bluez_HCIDump.h"
+#include "org_jboss_rhiot_beacon_bluez_HCIDump.h"
 #include "hcidumpinternal.h"
 #include <chrono>
 #include <thread>
@@ -84,9 +84,9 @@ static void runScanner(int device) {
     scan_frames(device, beacon_event_callback_to_java);
 }
 
-JNIEXPORT void JNICALL Java_org_jboss_summit2015_beacon_bluez_HCIDump_allocScanner
+JNIEXPORT void JNICALL Java_org_jboss_rhiot_beacon_bluez_HCIDump_allocScanner
 (JNIEnv *env, jclass clazz, jobject bb, jint device) {
-    printf("begin Java_org_jboss_summit2015_beacon_bluez_HCIDump_allocScanner(%x,%x,%x)\n", env, clazz, bb);
+    printf("begin Java_org_jboss_rhiot_beacon_bluez_HCIDump_allocScanner(%x,%x,%x)\n", env, clazz, bb);
     // Create global references to the ByteBuffer and HCIDump class for use in other native threads
     byteBufferObj = (jobject) env->NewGlobalRef(bb);
     hcidumpClass = (jclass) env->NewGlobalRef(clazz);
@@ -107,12 +107,12 @@ JNIEXPORT void JNICALL Java_org_jboss_summit2015_beacon_bluez_HCIDump_allocScann
 #endif
     tid = t.get_id();
     t.detach();
-    printf("end Java_org_jboss_summit2015_beacon_bluez_HCIDump_allocScanner, tid=%x, hcidumpClassRef=%x, eventNotification=%x\n", tid, hcidumpClass, eventNotification);
+    printf("end Java_org_jboss_rhiot_beacon_bluez_HCIDump_allocScanner, tid=%x, hcidumpClassRef=%x, eventNotification=%x\n", tid, hcidumpClass, eventNotification);
 }
 
-JNIEXPORT void JNICALL Java_org_jboss_summit2015_beacon_bluez_HCIDump_freeScanner
+JNIEXPORT void JNICALL Java_org_jboss_rhiot_beacon_bluez_HCIDump_freeScanner
         (JNIEnv *env, jclass clazz) {
-    printf("begin Java_org_jboss_summit2015_beacon_bluez_HCIDump_freeScanner(%x,%x)\n", env, clazz);
+    printf("begin Java_org_jboss_rhiot_beacon_bluez_HCIDump_freeScanner(%x,%x)\n", env, clazz);
     javaEnv->DeleteGlobalRef(hcidumpClass);
     javaEnv->DeleteGlobalRef(byteBufferObj);
 }
