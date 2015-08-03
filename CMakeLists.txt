@@ -52,7 +52,7 @@ endif()
 
 # The scannerJni shared library
 add_library (scannerJni SHARED src/org_jboss_rhiot_beacon_bluez_HCIDump.cpp src/hcidumpinternal.c src/parser.c)
-target_link_libraries(scannerJni)
+target_link_libraries(scannerJni bluetooth)
 install(TARGETS scannerJni
     ARCHIVE DESTINATION lib
     LIBRARY DESTINATION lib
