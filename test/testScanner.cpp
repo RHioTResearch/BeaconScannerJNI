@@ -1,7 +1,8 @@
 #include <src/hcidumpinternal.h>
+#include <stdio.h>
 
 static bool callback(beacon_info *info) {
-
+    printf("beacon_info:{uuid=%s, major=%d, minor=%d}\n", info->uuid, info->major, info->minor);
 }
 
 int main(int argc, char **argv) {
