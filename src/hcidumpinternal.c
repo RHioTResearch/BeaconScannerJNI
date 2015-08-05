@@ -41,6 +41,7 @@
 
 #include "parser.h"
 #include "sdp.h"
+#include <bluetooth.h>
 
 #include "hci.h"
 #include "hci_lib.h"
@@ -63,6 +64,9 @@ enum {
 
 // A stop flag
 bool stop_scan_frames = false;
+
+// Debug mode flag
+bool hcidumpDebugMode = false;
 
 /* Default options */
 static int  snap_len = SNAP_LEN;
@@ -327,13 +331,13 @@ static inline void ext_inquiry_data_dump(int level, struct frame *frm, uint8_t *
 
     switch (type) {
         case 0x01:
-#ifdef PRINT_DEBUG
+        if(hcidumpDebugMode) {
             p_indent(level, frm);
             printf("Flags:");
             for (i = 0; i < len; i++)
                 printf(" 0x%2.2x", data[i]);
             printf("\n");
-#endif
+        }
             break;
 
         case 0x02:
@@ -344,67 +348,66 @@ static inline void ext_inquiry_data_dump(int level, struct frame *frm, uint8_t *
             // incomplete/complete List of 32-bit Service Class UUIDs
         case 0x06:
         case 0x07:
-#ifdef PRINT_DEBUG
-            // incomplete/complete List of 128-bit Service Class UUIDs
-            p_indent(level, frm);
-            printf("%s service classes:", type == 0x06 ? "Incomplete" : "Complete");
-            for (i = 0; i < len / 2; i++)
-                printf(" 0x%4.4x", get_le16(data + i * 2));
-            printf("\n");
-#endif
+            if(hcidumpDebugMode) {
+                // incomplete/complete List of 128-bit Service Class UUIDs
+                p_indent(level, frm);
+                printf("%s service classes:", type == 0x06 ? "Incomplete" : "Complete");
+                for (i = 0; i < len / 2; i++)
+                    printf(" 0x%4.4x", bt_get_le16(data + i * 2));
+                printf("\n");
+            }
             break;
 
         case 0x08:
         case 0x09:
-#ifdef PRINT_DEBUG
-            str = malloc(len + 1);
-            if (str) {
-                snprintf(str, len + 1, "%s", (char *) data);
-                for (i = 0; i < len; i++)
-                    if (!isprint(str[i]))
-                        str[i] = '.';
-                p_indent(level, frm);
-                printf("%s local name: \'%s\'",
-                        type == 0x08 ? "Shortened" : "Complete", str);
-                for (i = 0; i < len; i++)
-                    printf(" 0x%2.2x", data[i]);
-                printf("\n");
-                free(str);
+            if(hcidumpDebugMode) {
+                str = malloc(len + 1);
+                if (str) {
+                    snprintf(str, len + 1, "%s", (char *) data);
+                    for (i = 0; i < len; i++)
+                        if (!isprint(str[i]))
+                            str[i] = '.';
+                    p_indent(level, frm);
+                    printf("%s local name: \'%s\'",
+                           type == 0x08 ? "Shortened" : "Complete", str);
+                    for (i = 0; i < len; i++)
+                        printf(" 0x%2.2x", data[i]);
+                    printf("\n");
+                    free(str);
+                }
             }
-#endif
             break;
 
         case 0x0a:
             info->power = *((uint8_t *) data);
-#ifdef PRINT_DEBUG
-            p_indent(level, frm);
-            printf("TX power level: %d\n", info->power);
-#endif
-
+            if(hcidumpDebugMode) {
+                p_indent(level, frm);
+                printf("TX power level: %d\n", info->power);
+            }
         case 0x12:
             //  Slave Connection Interval Range sent by Gimbals
-#ifdef PRINT_DEBUG
-            p_indent(level, frm);
-            printf("Slave Connection Interval Range %d bytes data\n", type, len);
-#endif
+            if(hcidumpDebugMode) {
+                p_indent(level, frm);
+                printf("Slave Connection Interval Range %d bytes data\n", type, len);
+            }
             break;
 
-#ifdef PRINT_DEBUG
         case 0x16:
-            printf("ServiceData16(%x %x), len=%d", data[0], data[1], len);
-            for (i = 2; i < len; i++)
-                printf(" 0x%2.2x", data[i]);
-            printf("\n");
+            if(hcidumpDebugMode) {
+                    printf("ServiceData16(%x %x), len=%d", data[0], data[1], len);
+                for (i = 2; i < len; i++)
+                    printf(" 0x%2.2x", data[i]);
+                printf("\n");
+            }
             break;
-#endif
         case 0xff:
 
-#ifdef PRINT_DEBUG
-            p_indent(level, frm);
-            printf("ManufacturerData(%d bytes), valid=%d:", len, len >= MIN_MANUFACTURER_DATA_SIZE);
-            print_bytes(data, len);
-            hex_debug(level, frm);
-#endif
+            if(hcidumpDebugMode) {
+                p_indent(level, frm);
+                printf("ManufacturerData(%d bytes), valid=%d:", len, len >= MIN_MANUFACTURER_DATA_SIZE);
+                print_bytes(data, len);
+                hex_debug(level, frm);
+            }
             // Skip any event that has less than the minimum data size for a beacon event
             if(len < MIN_MANUFACTURER_DATA_SIZE)
                 return;
@@ -431,10 +434,10 @@ static inline void ext_inquiry_data_dump(int level, struct frame *frm, uint8_t *
             }
             // null terminate the 2*UUID_SIZE bytes that make up the uuid string
             info->uuid[2*UUID_SIZE] = '\0';
-#ifdef PRINT_DEBUG
-            p_indent(level, frm);
-            printf("UUID(%d):%s\n", strlen(info->uuid), info->uuid);
-#endif
+            if(hcidumpDebugMode) {
+                p_indent(level, frm);
+                printf("UUID(%d):%s\n", strlen(info->uuid), info->uuid);
+            }
             // Get the beacon major id
             int m0 = data[index++];
             int m1 = data[index++];
@@ -443,11 +446,10 @@ static inline void ext_inquiry_data_dump(int level, struct frame *frm, uint8_t *
             m0 = data[index++];
             m1 = data[index++];
             info->minor = 256 * m0 + m1;
-#ifdef PRINT_DEBUG
-            p_indent(level, frm);
-            printf("Major:%d, Minor:%d\n", info->major, info->minor);
-#endif
-
+            if(hcidumpDebugMode) {
+                p_indent(level, frm);
+                printf("Major:%d, Minor:%d\n", info->major, info->minor);
+            }
             // Get the transmitted power, which is encoded as the 2's complement of the calibrated Tx Power
             info->calibrated_power = data[index] - 256;
             break;
@@ -471,13 +473,13 @@ static inline void evt_le_advertising_report_dump(int level, struct frame *frm, 
 
         p_ba2str(&info->bdaddr, addr);
 
-#ifdef PRINT_DEBUG
-        p_indent(level, frm);
-        printf("%s (%d)\n", evttype2str(info->evt_type), info->evt_type);
+        if(hcidumpDebugMode) {
+            p_indent(level, frm);
+            printf("%s (%d)\n", evttype2str(info->evt_type), info->evt_type);
 
-        p_indent(level, frm);
-        printf("bdaddr %s (%s)\n", addr, bdaddrtype2str(info->bdaddr_type));
-#endif
+            p_indent(level, frm);
+            printf("bdaddr %s (%s)\n", addr, bdaddrtype2str(info->bdaddr_type));
+        }
         while (offset < info->length) {
             int eir_data_len = info->data[offset];
 
@@ -490,10 +492,10 @@ static inline void evt_le_advertising_report_dump(int level, struct frame *frm, 
         frm->len -= LE_ADVERTISING_INFO_SIZE + info->length;
 
         binfo->rssi = ((int8_t *) frm->ptr)[frm->len - 1];
-#ifdef PRINT_DEBUG
-        p_indent(level, frm);
-        printf("RSSI: %d\n", binfo->rssi);
-#endif
+        if(hcidumpDebugMode) {
+            p_indent(level, frm);
+            printf("RSSI: %d\n", binfo->rssi);
+        }
         frm->ptr += RSSI_SIZE;
         frm->len -= RSSI_SIZE;
     }
@@ -509,11 +511,10 @@ static inline void le_meta_ev_dump(int level, struct frame *frm, beacon_info *in
     frm->ptr += EVT_LE_META_EVENT_SIZE;
     frm->len -= EVT_LE_META_EVENT_SIZE;
 
-#ifdef PRINT_DEBUG
-    p_indent(level, frm);
-    printf("%s\n", ev_le_meta_str[subevent]);
-#endif
-
+    if(hcidumpDebugMode) {
+        p_indent(level, frm);
+        printf("%s\n", ev_le_meta_str[subevent]);
+    }
     switch (mevt->subevent) {
         case EVT_LE_CONN_COMPLETE:
             //evt_le_conn_complete_dump(level + 1, frm);
@@ -543,10 +544,10 @@ static inline void event_dump(int level, struct frame *frm, beacon_info *info)
     uint8_t event = hdr->evt;
 
     if (event <= EVENT_NUM) {
-#ifdef PRINT_DEBUG
-        p_indent(level, frm);
-        printf("HCI Event: %s (0x%2.2x) plen %d\n", event_str[hdr->evt], hdr->evt, hdr->plen);
-#endif
+        if(hcidumpDebugMode) {
+            p_indent(level, frm);
+            printf("HCI Event: %s (0x%2.2x) plen %d\n", event_str[hdr->evt], hdr->evt, hdr->plen);
+        }
     } else if (hdr->evt == EVT_TESTING) {
         p_indent(level, frm);
         printf("HCI Event: Testing (0x%2.2x) plen %d\n", hdr->evt, hdr->plen);
@@ -719,18 +720,17 @@ int process_frames(int dev, int sock, int fd, unsigned long flags, beacon_event 
         /* Parse and print */
         memset(&info, 0, sizeof(info));
         frameNo ++;
-#ifdef PRINT_DEBUG
-        printf("Begin do_parse(ts=%ld.%ld)#%ld\n", frm.ts.tv_sec, frm.ts.tv_usec, frameNo);
-#endif
+        if(hcidumpDebugMode) {
+            printf("Begin do_parse(ts=%ld.%ld)#%ld\n", frm.ts.tv_sec, frm.ts.tv_usec, frameNo);
+        }
         int64_t time = -1;
         do_parse(&frm, &info);
         time = info.time;
         if(time > 0)
             stopped = callback(&info);
-#ifdef PRINT_DEBUG
-        printf("End do_parse(info.time=%lld)\n", time);
-#endif
-
+        if(hcidumpDebugMode) {
+            printf("End do_parse(info.time=%lld)\n", time);
+        }
     }
 
     return 0;

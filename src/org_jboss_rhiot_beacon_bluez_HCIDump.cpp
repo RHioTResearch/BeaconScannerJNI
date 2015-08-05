@@ -117,6 +117,17 @@ JNIEXPORT void JNICALL Java_org_jboss_rhiot_beacon_bluez_HCIDump_freeScanner
     javaEnv->DeleteGlobalRef(byteBufferObj);
 }
 
+/*
+ * Class:     org_jboss_rhiot_beacon_bluez_HCIDump
+ * Method:    enableDebugMode
+ * Signature: (Z)V
+ */
+JNIEXPORT void JNICALL Java_org_jboss_rhiot_beacon_bluez_HCIDump_enableDebugMode
+        (JNIEnv *env, jclass clazz, jboolean flag) {
+
+    hcidumpDebugMode = flag;
+}
+
 /**
 * Callback invoked by the hdidumpinternal.c code when a LE_ADVERTISING_REPORT event is seen on the stack. This
  * passes the event beacon_info back to java via the javaBeaconInfo pointer and returns the stop flag
@@ -124,9 +135,10 @@ JNIEXPORT void JNICALL Java_org_jboss_rhiot_beacon_bluez_HCIDump_freeScanner
 */
 static long eventCount = 0;
 extern "C" bool beacon_event_callback_to_java(beacon_info * info) {
-#if PRINT_DEBUG
-    printf("beacon_event_callback_to_java(%ld: %s, code=%d, time=%lld)\n", eventCount, info->uuid, info->code, info->time);
-#endif
+    if(hcidumpDebugMode) {
+        printf("beacon_event_callback_to_java(%ld: %s, code=%d, time=%lld)\n", eventCount, info->uuid, info->code,
+               info->time);
+    }
     eventCount ++;
     // Copy the event data to javaBeaconInfo
     memcpy(javaBeaconInfo, info, sizeof(*info));

@@ -23,6 +23,9 @@ typedef struct beacon_info {
 //typedef const beacon_info *beacon_info_stack_ptr;
 typedef bool (*beacon_event)(beacon_info *);
 
+// Debug mode flag
+extern bool hcidumpDebugMode;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
