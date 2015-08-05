@@ -743,6 +743,6 @@ int scan_frames(int device, beacon_event callback) {
     flags |= DUMP_EXT;
     flags |= DUMP_VERBOSE;
     int socketfd = open_socket(device);
-    printf("Scanning hci%d, socket=%d\n", device, socketfd);
+    printf("Scanning hci%d, socket=%d, hcidumpDebugMode=%d\n", device, socketfd, hcidumpDebugMode);
     return process_frames(device, socketfd, -1, flags, callback);
 }
