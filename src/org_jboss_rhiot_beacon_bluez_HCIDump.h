@@ -37,7 +37,7 @@ extern "C" {
  * Signature: (Ljava/nio/ByteBuffer;I)V
  */
 JNIEXPORT void JNICALL Java_org_jboss_rhiot_beacon_bluez_HCIDump_allocScanner
-        (JNIEnv *, jclass, jobject, jint);
+  (JNIEnv *, jclass, jobject, jint);
 
 /*
  * Class:     org_jboss_rhiot_beacon_bluez_HCIDump
@@ -45,7 +45,15 @@ JNIEXPORT void JNICALL Java_org_jboss_rhiot_beacon_bluez_HCIDump_allocScanner
  * Signature: ()V
  */
 JNIEXPORT void JNICALL Java_org_jboss_rhiot_beacon_bluez_HCIDump_freeScanner
-        (JNIEnv *, jclass);
+  (JNIEnv *, jclass);
+
+/*
+ * Class:     org_jboss_rhiot_beacon_bluez_HCIDump
+ * Method:    enableDebugMode
+ * Signature: (Z)V
+ */
+JNIEXPORT void JNICALL Java_org_jboss_rhiot_beacon_bluez_HCIDump_enableDebugMode
+  (JNIEnv *, jclass, jboolean);
 
 #ifdef __cplusplus
 }
