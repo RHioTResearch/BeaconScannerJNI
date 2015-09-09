@@ -1,4 +1,5 @@
 #include <string.h>
+#include <stdlib.h>
 #include "org_jboss_rhiot_beacon_bluez_HCIDump.h"
 #include "hcidumpinternal.h"
 #include <chrono>
