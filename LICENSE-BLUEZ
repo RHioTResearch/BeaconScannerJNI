@@ -1,0 +1,4 @@
+The src/hcidumpinternal.c and src/parser.[ch] are licensed under under GNU General Public License (GPL) since that
+is the license of the BlueZ project and these files are derived from it.
+
+See http://www.bluez.org/faq/common/

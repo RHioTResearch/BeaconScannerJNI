@@ -16,9 +16,25 @@ set(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH} usr/local/lib)
 #add_definitions(-DPRINT_DEBUG)
 
 set(CMAKE_VERBOSE_MAKEFILE ON)
-# BluezHome is set in the parent CMakeLists.txt file
+# Set the BlueZ source home
+set(BluezHome $ENV{BluezHome})
+if("${BluezHome}" STREQUAL "")
+    message("No BluezHome environment variable set, looking...")
+    # Check for 5.39 version under ~/Dev
+    if(EXISTS $ENV{HOME}/Dev/bluez-5.39)
+        set(BluezHome $ENV{HOME}/Dev/bluez-5.39)
+        message(STATUS "BluezHome found at: ${BluezHome}")
+    elseif(EXISTS $ENV{HOME}/bluez-5.39)
+        set(BluezHome $ENV{HOME}/bluez-5.39)
+        message(STATUS "BluezHome found at: ${BluezHome}")
+    else()
+        # Default to a download in my envrionment
+        set(BluezHome $ENV{HOME}/Dev/IoT/BLE/BlueZ/bluez-5.39)
+        message(STATUS "BluezHome defaulting to ${BluezHome}")
+    endif()
+endif()
 set(BluezToolsParser ${BluezHome}/tools/parser)
-include_directories(. ${BluezHome} ${BluezHome}/tools /usr/include/bluetooth  /usr/include/x86_64-linux-gnu/)
+include_directories(.  /usr/include/bluetooth /usr/local/include/bluetooth /usr/include/x86_64-linux-gnu/ ${BluezHome}/lib ${BluezHome}/tools)
 
 # Set JAVA_HOME from environment, or default to known development locations
 set(JAVA_HOME $ENV{JAVA_HOME})
@@ -30,12 +46,12 @@ if("${JAVA_HOME}" STREQUAL "")
     elseif(EXISTS /usr/lib/jvm/jdk1.8.0_51)
         set(JAVA_HOME /usr/lib/jvm/jdk1.8.0_51)
         message(STATUS "Using Oracle JDK=${JAVA_HOME}")
-    elseif(EXISTS /Library/Java/JavaVirtualMachines/jdk1.8.0_45.jdk/Contents/Home)
-        set(JAVA_HOME /Library/Java/JavaVirtualMachines/jdk1.8.0_45.jdk/Contents/Home)
+    elseif(EXISTS /Library/Java/JavaVirtualMachines/jdk1.8.0_77/Contents/Home)
+        set(JAVA_HOME /Library/Java/JavaVirtualMachines/jdk1.8.0_77.jdk/Contents/Home)
         message(STATUS "Using Mac JDK=${JAVA_HOME}")
     else()
     # Default to a download in my envrionment
-        set(JAVA_HOME /root/Downloads/jdk1.8.0_45)
+        set(JAVA_HOME /Library/Java/JavaVirtualMachines/jdk1.8.0_77.jdk/Contents/Home)
         message(STATUS "JAVA_HOME defaulting to ${JAVA_HOME}")
     endif()
 endif()
