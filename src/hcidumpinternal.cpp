@@ -2,7 +2,7 @@
 
 /*
  *  Code from the bluez tools/hcidump.c
- *  Copyright 2015 Red Hat
+ *  Copyright 2015-2016 Red Hat
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
@@ -47,11 +47,6 @@
 #include "hci_lib.h"
 
 #define SNAP_LEN	HCI_MAX_FRAME_SIZE
-// The size of the uuid in the manufacturer data
-#define UUID_SIZE 16
-// The minimum size of manufacturer data we are interested in. This consists of:
-// manufacturer(2), code(2), uuid(16), major(2), minor(2), calibrated power(1)
-#define MIN_MANUFACTURER_DATA_SIZE (2+2+UUID_SIZE+2+2+1)
 
 /* Modes */
 enum {
@@ -296,7 +291,7 @@ static inline void print_bytes(uint8_t *data, u_int8_t len) {
 }
 static inline void hex_debug(int level, struct frame *frm)
 {
-    unsigned char *buf = frm->ptr;
+    unsigned char *buf = (unsigned char*) frm->ptr;
     register int i, n;
     int num = frm->len;
 
@@ -316,25 +311,28 @@ static inline void hex_debug(int level, struct frame *frm)
 /**
 * Parse the AD Structure values found in the AD payload
 */
-static inline void ext_inquiry_data_dump(int level, struct frame *frm, uint8_t *data, beacon_info *info) {
-    uint8_t len = data[0];
-    uint8_t type;
+static inline void ext_inquiry_data_dump(int level, struct frame *frm, uint8_t *data, ad_data& info) {
+    ad_structure ads;
     char *str;
     int i;
 
-    if (len == 0)
+    ads.length = data[0];
+    if (ads.length == 0)
         return;
 
-    type = data[1];
+    ads.type = data[1];
     data += 2;
-    len -= 1;
+    ads.length -= 1;
+    ads.data = new uint8_t[ads.length];
+    info.data.push_back(ads);
 
-    switch (type) {
+    // Just for debugging
+    switch (ads.type) {
         case 0x01:
         if(hcidumpDebugMode) {
             p_indent(level, frm);
             printf("Flags:");
-            for (i = 0; i < len; i++)
+            for (i = 0; i < ads.length; i++)
                 printf(" 0x%2.2x", data[i]);
             printf("\n");
         }
@@ -351,8 +349,8 @@ static inline void ext_inquiry_data_dump(int level, struct frame *frm, uint8_t *
             if(hcidumpDebugMode) {
                 // incomplete/complete List of 128-bit Service Class UUIDs
                 p_indent(level, frm);
-                printf("%s service classes:", type == 0x06 ? "Incomplete" : "Complete");
-                for (i = 0; i < len / 2; i++)
+                printf("%s service classes:", ads.type == 0x06 ? "Incomplete" : "Complete");
+                for (i = 0; i < ads.length / 2; i++)
                     printf(" 0x%4.4x", bt_get_le16(data + i * 2));
                 printf("\n");
             }
@@ -361,16 +359,16 @@ static inline void ext_inquiry_data_dump(int level, struct frame *frm, uint8_t *
         case 0x08:
         case 0x09:
             if(hcidumpDebugMode) {
-                str = malloc(len + 1);
+                str = (char *) malloc(ads.length + 1);
                 if (str) {
-                    snprintf(str, len + 1, "%s", (char *) data);
-                    for (i = 0; i < len; i++)
+                    snprintf(str, ads.length + 1, "%s", (char *) data);
+                    for (i = 0; i < ads.length; i++)
                         if (!isprint(str[i]))
                             str[i] = '.';
                     p_indent(level, frm);
                     printf("%s local name: \'%s\'",
-                           type == 0x08 ? "Shortened" : "Complete", str);
-                    for (i = 0; i < len; i++)
+                           ads.type == 0x08 ? "Shortened" : "Complete", str);
+                    for (i = 0; i < ads.length; i++)
                         printf(" 0x%2.2x", data[i]);
                     printf("\n");
                     free(str);
@@ -379,23 +377,23 @@ static inline void ext_inquiry_data_dump(int level, struct frame *frm, uint8_t *
             break;
 
         case 0x0a:
-            info->power = *((uint8_t *) data);
+            uint8_t power = *((uint8_t *) data);
             if(hcidumpDebugMode) {
                 p_indent(level, frm);
-                printf("TX power level: %d\n", info->power);
+                printf("TX power level: %d\n", power);
             }
         case 0x12:
             //  Slave Connection Interval Range sent by Gimbals
             if(hcidumpDebugMode) {
                 p_indent(level, frm);
-                printf("Slave Connection Interval Range %d bytes data\n", type, len);
+                printf("Slave Connection Interval Range %d bytes data\n", ads.length);
             }
             break;
 
         case 0x16:
             if(hcidumpDebugMode) {
-                    printf("ServiceData16(%x %x), len=%d", data[0], data[1], len);
-                for (i = 2; i < len; i++)
+                    printf("ServiceData16(%x %x), len=%d", data[0], data[1], ads.length);
+                for (i = 2; i < ads.length; i++)
                     printf(" 0x%2.2x", data[i]);
                 printf("\n");
             }
@@ -404,75 +402,31 @@ static inline void ext_inquiry_data_dump(int level, struct frame *frm, uint8_t *
 
             if(hcidumpDebugMode) {
                 p_indent(level, frm);
-                printf("ManufacturerData(%d bytes), valid=%d:", len, len >= MIN_MANUFACTURER_DATA_SIZE);
-                print_bytes(data, len);
+                printf("ManufacturerData(%d bytes), valid=%d:", ads.length, ads.length >= MIN_MANUFACTURER_DATA_SIZE);
+                print_bytes(data, ads.length);
                 hex_debug(level, frm);
             }
-            // Skip any event that has less than the minimum data size for a beacon event
-            if(len < MIN_MANUFACTURER_DATA_SIZE)
-                return;
-
-            info->time = frm->ts.tv_sec;
-            info->time *= 1000;
-            info->time += frm->ts.tv_usec/1000;
-            // Get the manufacturer code from the first two octets
-            int index = 0;
-            info->manufacturer = 256 * data[index++] + data[index++];
-
-            // Get the first octet of the beacon code
-            info->code = 256 * data[index++] + data[index++];
-
-            // Get the proximity uuid
-            int n;
-            for(n = 0; n < 2*UUID_SIZE; n += 2, index ++) {
-                int b0 = (data[index] & 0xf0) >> 4;
-                int b1 = data[index] & 0x0f;
-                char c0 = toHexChar(b0);
-                char c1 = toHexChar(b1);
-                info->uuid[n] = c0;
-                info->uuid[n+1] = c1;
-            }
-            // null terminate the 2*UUID_SIZE bytes that make up the uuid string
-            info->uuid[2*UUID_SIZE] = '\0';
-            if(hcidumpDebugMode) {
-                p_indent(level, frm);
-                printf("UUID(%d):%s\n", strlen(info->uuid), info->uuid);
-            }
-            // Get the beacon major id
-            int m0 = data[index++];
-            int m1 = data[index++];
-            info->major = 256 * m0 + m1;
-            // Get the beacon minor id
-            m0 = data[index++];
-            m1 = data[index++];
-            info->minor = 256 * m0 + m1;
-            if(hcidumpDebugMode) {
-                p_indent(level, frm);
-                printf("Major:%d, Minor:%d\n", info->major, info->minor);
-            }
-            // Get the transmitted power, which is encoded as the 2's complement of the calibrated Tx Power
-            info->calibrated_power = data[index] - 256;
             break;
 
         default:
             p_indent(level, frm);
-            printf("Unknown type 0x%02x with %d bytes data\n", type, len);
+            printf("Unknown type 0x%02x with %d bytes data\n", ads.type, ads.length);
             if(hcidumpDebugMode) {
-                print_bytes(data, len);
+                print_bytes(data, ads.length);
                 hex_debug(level, frm);
             }
             break;
     }
 }
 
-static inline void evt_le_advertising_report_dump(int level, struct frame *frm, beacon_info *binfo)
+static inline void evt_le_advertising_report_dump(int level, struct frame *frm, ad_data& packet)
 {
     uint8_t num_reports = get_u8(frm);
     const uint8_t RSSI_SIZE = 1;
 
     while (num_reports--) {
         char addr[18];
-        le_advertising_info *info = frm->ptr;
+        le_advertising_info *info = (le_advertising_info *) frm->ptr;
         int offset = 0;
 
         p_ba2str(&info->bdaddr, addr);
@@ -487,7 +441,7 @@ static inline void evt_le_advertising_report_dump(int level, struct frame *frm, 
         while (offset < info->length) {
             int eir_data_len = info->data[offset];
 
-            ext_inquiry_data_dump(level, frm, &info->data[offset], binfo);
+            ext_inquiry_data_dump(level, frm, &info->data[offset], packet);
 
             offset += eir_data_len + 1;
         }
@@ -495,19 +449,22 @@ static inline void evt_le_advertising_report_dump(int level, struct frame *frm, 
         frm->ptr += LE_ADVERTISING_INFO_SIZE + info->length;
         frm->len -= LE_ADVERTISING_INFO_SIZE + info->length;
 
-        binfo->rssi = ((int8_t *) frm->ptr)[frm->len - 1];
+        packet.time = frm->ts.tv_sec;
+        packet.time *= 1000;
+        packet.time += frm->ts.tv_usec/1000;
+        packet.rssi = ((int8_t *) frm->ptr)[frm->len - 1];
         if(hcidumpDebugMode) {
             p_indent(level, frm);
-            printf("RSSI: %d\n", binfo->rssi);
+            printf("RSSI: %d\n", packet.rssi);
         }
         frm->ptr += RSSI_SIZE;
         frm->len -= RSSI_SIZE;
     }
 }
 
-static inline void le_meta_ev_dump(int level, struct frame *frm, beacon_info *info)
+static inline void le_meta_ev_dump(int level, struct frame *frm, ad_data& info)
 {
-    evt_le_meta_event *mevt = frm->ptr;
+    evt_le_meta_event *mevt = (evt_le_meta_event *) frm->ptr;
     uint8_t subevent;
 
     subevent = mevt->subevent;
@@ -541,10 +498,9 @@ static inline void le_meta_ev_dump(int level, struct frame *frm, beacon_info *in
     }
 }
 
-
-static inline void event_dump(int level, struct frame *frm, beacon_info *info)
+static inline void event_dump(int level, struct frame *frm, ad_data& info)
 {
-    hci_event_hdr *hdr = frm->ptr;
+    hci_event_hdr *hdr = (hci_event_hdr *)frm->ptr;
     uint8_t event = hdr->evt;
 
     if (event <= EVENT_NUM) {
@@ -564,9 +520,9 @@ static inline void event_dump(int level, struct frame *frm, beacon_info *info)
     frm->len -= HCI_EVENT_HDR_SIZE;
 
     if (event == EVT_CMD_COMPLETE) {
-        evt_cmd_complete *cc = frm->ptr;
+        evt_cmd_complete *cc = (evt_cmd_complete *) frm->ptr;
         if (cc->opcode == cmd_opcode_pack(OGF_INFO_PARAM, OCF_READ_LOCAL_VERSION)) {
-            read_local_version_rp *rp = frm->ptr + EVT_CMD_COMPLETE_SIZE;
+            read_local_version_rp *rp = (read_local_version_rp *)frm->ptr + EVT_CMD_COMPLETE_SIZE;
         }
     }
 
@@ -588,7 +544,41 @@ static inline void event_dump(int level, struct frame *frm, beacon_info *info)
     }
 }
 
-static void do_parse(struct frame *frm, beacon_info *info) {
+static inline void extractBeaconInfo(ad_structure& ads, beacon_info *info) {
+
+    uint8_t *data = ads.data;
+    // Get the manufacturer code from the first two octets
+    int index = 0;
+    info->manufacturer = 256 * data[index++] + data[index++];
+
+    // Get the first octet of the beacon code
+    info->code = 256 * data[index++] + data[index++];
+
+    // Get the proximity uuid
+    int n;
+    for(n = 0; n < 2*UUID_SIZE; n += 2, index ++) {
+        int b0 = (data[index] & 0xf0) >> 4;
+        int b1 = data[index] & 0x0f;
+        char c0 = toHexChar(b0);
+        char c1 = toHexChar(b1);
+        info->uuid[n] = c0;
+        info->uuid[n+1] = c1;
+    }
+    // null terminate the 2*UUID_SIZE bytes that make up the uuid string
+    info->uuid[2*UUID_SIZE] = '\0';
+    // Get the beacon major id
+    int m0 = data[index++];
+    int m1 = data[index++];
+    info->major = 256 * m0 + m1;
+    // Get the beacon minor id
+    m0 = data[index++];
+    m1 = data[index++];
+    info->minor = 256 * m0 + m1;
+    // Get the transmitted power, which is encoded as the 2's complement of the calibrated Tx Power
+    info->calibrated_power = data[index] - 256;
+}
+
+static void do_parse(struct frame *frm, ad_data info) {
     uint8_t type = *(uint8_t *)frm->ptr;
 
     frm->ptr++; frm->len--;
@@ -603,13 +593,12 @@ static void do_parse(struct frame *frm, beacon_info *info) {
             hex_debug(0, frm);
             break;
     }
-
 }
 
 /*
     This is the process_frames function from hcidump.c with the addition of the beacon_event callback
  */
-int process_frames(int dev, int sock, int fd, unsigned long flags, beacon_event callback)
+int process_frames(int dev, int sock, int fd, unsigned long flags, ad_event callback)
 {
     struct cmsghdr *cmsg;
     struct msghdr msg;
@@ -631,7 +620,7 @@ int process_frames(int dev, int sock, int fd, unsigned long flags, beacon_event 
     if (flags & DUMP_BTSNOOP)
         hdr_size = BTSNOOP_PKT_SIZE;
 
-    buf = malloc(snap_len + hdr_size);
+    buf = (char *) malloc(snap_len + hdr_size);
     if (!buf) {
         perror("Can't allocate data buffer");
         return -1;
@@ -639,7 +628,7 @@ int process_frames(int dev, int sock, int fd, unsigned long flags, beacon_event 
 
     frm.data = buf + hdr_size;
 
-    ctrl = malloc(100);
+    ctrl = (char *) malloc(100);
     if (!ctrl) {
         free(buf);
         perror("Can't allocate control buffer");
@@ -703,7 +692,6 @@ int process_frames(int dev, int sock, int fd, unsigned long flags, beacon_event 
         frm.in = 0;
 
         cmsg = CMSG_FIRSTHDR(&msg);
-        beacon_info info;
         while (cmsg) {
             int dir;
             switch (cmsg->cmsg_type) {
@@ -722,25 +710,53 @@ int process_frames(int dev, int sock, int fd, unsigned long flags, beacon_event 
         frm.len = frm.data_len;
 
         /* Parse and print */
-        memset(&info, 0, sizeof(info));
         frameNo ++;
         if(hcidumpDebugMode) {
             printf("Begin do_parse(ts=%ld.%ld)#%ld\n", frm.ts.tv_sec, frm.ts.tv_usec, frameNo);
         }
-        int64_t time = -1;
-        do_parse(&frm, &info);
-        time = info.time;
+        ad_data data;
+        do_parse(&frm, data);
+        int64_t time = data.time;
         if(time > 0)
-            stopped = callback(&info);
+            stopped = callback(data);
         if(hcidumpDebugMode) {
             printf("End do_parse(info.time=%lld)\n", time);
         }
     }
 
+    free(buf);
+    free(ctrl);
+
     return 0;
 }
 
-int scan_frames(int device, beacon_event callback) {
+
+int scan_frames(int32_t device, beacon_event callback) {
+
+    // Lambda wrapper around the legacy callback
+    auto wrapper = [&] (std::vector<ad_structure>& events) {
+        beacon_info *info = nullptr;
+        // Check for a manufacturer specific data frame that looks like a beacon event
+        for (std::vector<ad_structure>::iterator it = events.begin(); it != events.end(); ++it) {
+            if (it->type == 0xff) {
+                if (it->length > MIN_MANUFACTURER_DATA_SIZE) {
+                    // Pull out the beacon info
+                    extractBeaconInfo(*it, info);
+                    if (hcidumpDebugMode) {
+                        printf("Major:%d, Minor:%d\n", info->major, info->minor);
+                        printf("UUID(%d):%s\n", strlen(info->uuid), info->uuid);
+                    }
+
+                    return (*callback)(info);
+                }
+            }
+        }
+        return false;
+    };
+    return scan_for_ad_events(device, wrapper);
+}
+
+int32_t scan_for_ad_events(int32_t device, ad_event callback) {
     unsigned long flags = 0;
 
     flags |= DUMP_TSTAMP;
