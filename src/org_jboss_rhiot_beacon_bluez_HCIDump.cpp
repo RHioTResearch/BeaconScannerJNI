@@ -7,9 +7,12 @@
 using namespace std;
 
 static JavaVM *theVM;
-
-// the beacon_info pointer shared with java as a direct ByteBuffer
+static jboolean useAdData = true;
+// the beacon_info pointer shared with java as a direct ByteBuffer when using the beacon oriented scanner
 static beacon_info *javaBeaconInfo;
+// The ad_data_inline pointer shared with java as a direct ByteBuffer when using the general scanner
+static ad_data_inline *javaAdData;
+
 static jobject byteBufferObj;
 // a cached object handle to the org.jboss.summit2015.beacon.bluez.HCIDump class
 static jclass hcidumpClass;
@@ -17,7 +20,9 @@ static jclass hcidumpClass;
 static JNIEnv *javaEnv = nullptr;
 static jmethodID eventNotification;
 
+// The callback for the
 extern "C" bool beacon_event_callback_to_java(beacon_info * info);
+extern "C" bool ad_event_callback_to_java(ad_data_inline& info);
 
 /**
  * The shared library load callback to set the JavaVM pointer
@@ -41,8 +46,14 @@ static void attachToJavaVM() {
                 return;
             }
         }
-        javaBeaconInfo = (beacon_info *) javaEnv->GetDirectBufferAddress(byteBufferObj);
-        memset(javaBeaconInfo, 0, sizeof(beacon_info));
+        //
+        if(useAdData) {
+            javaAdData = (ad_data_inline *) javaEnv->GetDirectBufferAddress(byteBufferObj);
+            memset(javaAdData, 0, sizeof(ad_data_inline));
+        } else {
+            javaBeaconInfo = (beacon_info *) javaEnv->GetDirectBufferAddress(byteBufferObj);
+            memset(javaBeaconInfo, 0, sizeof(beacon_info));
+        }
     }
 }
 
@@ -82,11 +93,14 @@ static void runScanner(int device) {
     attachToJavaVM();
     while(waiting)
         this_thread::yield();
-    scan_frames(device, beacon_event_callback_to_java);
+    if(useAdData)
+        scan_for_ad_events_inline(device, ad_event_callback_to_java);
+    else
+        scan_frames(device, beacon_event_callback_to_java);
 }
 
 JNIEXPORT void JNICALL Java_org_jboss_rhiot_beacon_bluez_HCIDump_allocScanner
-(JNIEnv *env, jclass clazz, jobject bb, jint device) {
+        (JNIEnv *env, jclass clazz, jobject bb, jint device, jboolean isGeneral) {
     printf("begin Java_org_jboss_rhiot_beacon_bluez_HCIDump_allocScanner(%x,%x,%x)\n", env, clazz, bb);
     // Create global references to the ByteBuffer and HCIDump class for use in other native threads
     byteBufferObj = (jobject) env->NewGlobalRef(bb);
@@ -131,7 +145,7 @@ JNIEXPORT void JNICALL Java_org_jboss_rhiot_beacon_bluez_HCIDump_enableDebugMode
 
 /**
 * Callback invoked by the hdidumpinternal.c code when a LE_ADVERTISING_REPORT event is seen on the stack. This
- * passes the event beacon_info back to java via the javaBeaconInfo pointer and returns the stop flag
+ * passes the event info back to java via the javaAdInfo/javaBeaconInfo pointer and returns the stop flag
  * indicator as returned by the event notification callback return value.
 */
 static long eventCount = 0;
@@ -143,6 +157,30 @@ extern "C" bool beacon_event_callback_to_java(beacon_info * info) {
     eventCount ++;
     // Copy the event data to javaBeaconInfo
     memcpy(javaBeaconInfo, info, sizeof(*info));
+    // Notify java that the buffer has been updated
+    jboolean stop = javaEnv->CallStaticBooleanMethod(hcidumpClass, eventNotification);
+    return stop == JNI_TRUE;
+}
+
+static inline const char* toHexString(uint8_t *data, uint8_t length) {
+    static char buffer[64];
+    char *loc = buffer;
+    for(int n = 0; n < length; n ++) {
+        sprintf(loc, "%.2X:", data[n]);
+        loc += 3;
+    }
+    *loc = 0;
+    return buffer;
+}
+extern "C" bool ad_event_callback_to_java(ad_data_inline& info) {
+    if(hcidumpDebugMode) {
+        printf("ad_event_callback_to_java(%ld: %s, time=%lld)\n", eventCount, toHexString(info.bdaddr, 6), info.time);
+    }
+
+    eventCount ++;
+    // Copy the event data to javaAdData
+    memcpy(javaAdData, &info, info.total_length);
+
     // Notify java that the buffer has been updated
     jboolean stop = javaEnv->CallStaticBooleanMethod(hcidumpClass, eventNotification);
     return stop == JNI_TRUE;

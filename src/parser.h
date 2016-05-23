@@ -32,9 +32,9 @@
 #include "bluetooth.h"
 
 struct frame {
-	void		*data;
+	uint8_t		*data;
 	uint32_t	data_len;
-	void		*ptr;
+	uint8_t		*ptr;
 	uint32_t	len;
 	uint16_t	dev_id;
 	uint8_t		in;
@@ -162,7 +162,7 @@ static inline void p_ba2str(const bdaddr_t *ba, char *str)
 
 static inline uint8_t get_u8(struct frame *frm)
 {
-	uint8_t *u8_ptr = frm->ptr;
+	uint8_t *u8_ptr = (uint8_t *) frm->ptr;
 	frm->ptr += 1;
 	frm->len -= 1;
 	return *u8_ptr;
@@ -170,7 +170,7 @@ static inline uint8_t get_u8(struct frame *frm)
 
 static inline uint16_t get_u16(struct frame *frm)
 {
-	uint16_t *u16_ptr = frm->ptr;
+	uint16_t *u16_ptr = (uint16_t *) frm->ptr;
 	frm->ptr += 2;
 	frm->len -= 2;
 	return bt_get_be16(u16_ptr);
@@ -178,7 +178,7 @@ static inline uint16_t get_u16(struct frame *frm)
 
 static inline uint32_t get_u32(struct frame *frm)
 {
-	uint32_t *u32_ptr = frm->ptr;
+	uint32_t *u32_ptr = (uint32_t *) frm->ptr;
 	frm->ptr += 4;
 	frm->len -= 4;
 	return bt_get_be32(u32_ptr);
@@ -186,7 +186,7 @@ static inline uint32_t get_u32(struct frame *frm)
 
 static inline uint64_t get_u64(struct frame *frm)
 {
-	uint64_t *u64_ptr = frm->ptr;
+	uint64_t *u64_ptr = (uint64_t *) frm->ptr;
 	uint64_t u64 = bt_get_unaligned(u64_ptr), tmp;
 	frm->ptr += 8;
 	frm->len -= 8;

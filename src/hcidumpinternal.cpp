@@ -25,6 +25,7 @@
  *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
+#include <functional>
 #include <stdio.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -39,12 +40,14 @@
 #include <sys/socket.h>
 #include <ctype.h>
 
+extern "C" {
 #include "parser.h"
 #include "sdp.h"
 #include <bluetooth.h>
+#include <hci.h>
 
-#include "hci.h"
 #include "hci_lib.h"
+}
 
 #define SNAP_LEN	HCI_MAX_FRAME_SIZE
 
@@ -152,7 +155,7 @@ static int open_socket(int dev)
 }
 
 #define EVENT_NUM 77
-static char *event_str[EVENT_NUM + 1] = {
+static char const *event_str[EVENT_NUM + 1] = {
         "Unknown",
         "Inquiry Complete",
         "Inquiry Result",
@@ -234,7 +237,7 @@ static char *event_str[EVENT_NUM + 1] = {
 };
 
 #define LE_EV_NUM 5
-static char *ev_le_meta_str[LE_EV_NUM + 1] = {
+static char const *ev_le_meta_str[LE_EV_NUM + 1] = {
         "Unknown",
         "LE Connection Complete",
         "LE Advertising Report",
@@ -308,23 +311,35 @@ static inline void hex_debug(int level, struct frame *frm)
         printf("\n");
 }
 
+static inline void dump_ads(ad_structure& ads) {
+    printf("ADS(%x:%d): ", ads.type, ads.length);
+    for(int n = 0; n < ads.length; n ++)
+        printf("%.02x", ads.data[n]);
+    printf("\n");
+}
+
 /**
 * Parse the AD Structure values found in the AD payload
 */
 static inline void ext_inquiry_data_dump(int level, struct frame *frm, uint8_t *data, ad_data& info) {
-    ad_structure ads;
+    ad_structure *adsPtr;
     char *str;
     int i;
 
-    ads.length = data[0];
-    if (ads.length == 0)
+    int length = data[0];
+    adsPtr = (ad_structure *) malloc(length+2);
+    adsPtr->type = data[1];
+    // Do not include the checksum
+    adsPtr->length = length-1;
+    info.data.push_back(adsPtr);
+    if (length <= 1)
         return;
 
-    ads.type = data[1];
+    ad_structure& ads = *adsPtr;
     data += 2;
-    ads.length -= 1;
-    ads.data = new uint8_t[ads.length];
-    info.data.push_back(ads);
+    memcpy(ads.data, data, ads.length);
+    if(hcidumpDebugMode)
+        dump_ads(ads);
 
     // Just for debugging
     switch (ads.type) {
@@ -376,12 +391,14 @@ static inline void ext_inquiry_data_dump(int level, struct frame *frm, uint8_t *
             }
             break;
 
-        case 0x0a:
-            uint8_t power = *((uint8_t *) data);
-            if(hcidumpDebugMode) {
+        case 0x0a: {
+            uint8_t power = *data;
+            if (hcidumpDebugMode) {
                 p_indent(level, frm);
                 printf("TX power level: %d\n", power);
             }
+        }
+            break;
         case 0x12:
             //  Slave Connection Interval Range sent by Gimbals
             if(hcidumpDebugMode) {
@@ -430,6 +447,8 @@ static inline void evt_le_advertising_report_dump(int level, struct frame *frm, 
         int offset = 0;
 
         p_ba2str(&info->bdaddr, addr);
+        packet.bdaddr_type = info->bdaddr_type;
+        memcpy(packet.bdaddr, &info->bdaddr, sizeof(packet.bdaddr));
 
         if(hcidumpDebugMode) {
             p_indent(level, frm);
@@ -438,6 +457,13 @@ static inline void evt_le_advertising_report_dump(int level, struct frame *frm, 
             p_indent(level, frm);
             printf("bdaddr %s (%s)\n", addr, bdaddrtype2str(info->bdaddr_type));
         }
+#ifdef FULL_DEBUG
+        printf("Debug(%d): [", info->length);
+        for(int n = 0; n < info->length; n ++) {
+            printf("%x", info->data[n]);
+        }
+        printf("]\n");
+#endif
         while (offset < info->length) {
             int eir_data_len = info->data[offset];
 
@@ -570,6 +596,7 @@ static inline void extractBeaconInfo(ad_structure& ads, beacon_info *info) {
     int m0 = data[index++];
     int m1 = data[index++];
     info->major = 256 * m0 + m1;
+    printf("Major: %d\n", info->major);
     // Get the beacon minor id
     m0 = data[index++];
     m1 = data[index++];
@@ -578,7 +605,7 @@ static inline void extractBeaconInfo(ad_structure& ads, beacon_info *info) {
     info->calibrated_power = data[index] - 256;
 }
 
-static void do_parse(struct frame *frm, ad_data info) {
+static void do_parse(struct frame *frm, ad_data& info) {
     uint8_t type = *(uint8_t *)frm->ptr;
 
     frm->ptr++; frm->len--;
@@ -598,7 +625,7 @@ static void do_parse(struct frame *frm, ad_data info) {
 /*
     This is the process_frames function from hcidump.c with the addition of the beacon_event callback
  */
-int process_frames(int dev, int sock, int fd, unsigned long flags, ad_event callback)
+int process_frames(int dev, int sock, int fd, unsigned long flags, std::function<bool(ad_data&)> callback)
 {
     struct cmsghdr *cmsg;
     struct msghdr msg;
@@ -608,7 +635,7 @@ int process_frames(int dev, int sock, int fd, unsigned long flags, ad_event call
     struct frame frm;
     struct pollfd fds[2];
     int nfds = 0;
-    char *buf, *ctrl;
+    uint8_t *buf, *ctrl;
     int len, hdr_size = HCIDUMP_HDR_SIZE;
 
     if (sock < 0)
@@ -620,7 +647,7 @@ int process_frames(int dev, int sock, int fd, unsigned long flags, ad_event call
     if (flags & DUMP_BTSNOOP)
         hdr_size = BTSNOOP_PKT_SIZE;
 
-    buf = (char *) malloc(snap_len + hdr_size);
+    buf = (uint8_t*) malloc(snap_len + hdr_size);
     if (!buf) {
         perror("Can't allocate data buffer");
         return -1;
@@ -628,7 +655,7 @@ int process_frames(int dev, int sock, int fd, unsigned long flags, ad_event call
 
     frm.data = buf + hdr_size;
 
-    ctrl = (char *) malloc(100);
+    ctrl = (uint8_t *) malloc(100);
     if (!ctrl) {
         free(buf);
         perror("Can't allocate control buffer");
@@ -714,13 +741,19 @@ int process_frames(int dev, int sock, int fd, unsigned long flags, ad_event call
         if(hcidumpDebugMode) {
             printf("Begin do_parse(ts=%ld.%ld)#%ld\n", frm.ts.tv_sec, frm.ts.tv_usec, frameNo);
         }
-        ad_data data;
-        do_parse(&frm, data);
-        int64_t time = data.time;
-        if(time > 0)
-            stopped = callback(data);
+        ad_data event;
+        do_parse(&frm, event);
+        int64_t time = event.time;
+        if(time > 0) {
+            stopped = callback(event);
+            // Free the ad_structure.data
+            for(int n = 0; n < event.data.size(); n ++) {
+                ad_structure* ads = event.data[n];
+                free(ads);
+            }
+        }
         if(hcidumpDebugMode) {
-            printf("End do_parse(info.time=%lld)\n", time);
+            printf("End do_parse(info.time=%lld, ad.count=%ld)\n", time, event.data.size());
         }
     }
 
@@ -730,25 +763,43 @@ int process_frames(int dev, int sock, int fd, unsigned long flags, ad_event call
     return 0;
 }
 
-
+/**
+ * The legacy iBeacon style of scanner
+ */
 int scan_frames(int32_t device, beacon_event callback) {
 
     // Lambda wrapper around the legacy callback
-    auto wrapper = [&] (std::vector<ad_structure>& events) {
+    std::function<bool(ad_data&)> wrapper = [&] (ad_data& event) {
         beacon_info *info = nullptr;
         // Check for a manufacturer specific data frame that looks like a beacon event
-        for (std::vector<ad_structure>::iterator it = events.begin(); it != events.end(); ++it) {
-            if (it->type == 0xff) {
-                if (it->length > MIN_MANUFACTURER_DATA_SIZE) {
-                    // Pull out the beacon info
-                    extractBeaconInfo(*it, info);
-                    if (hcidumpDebugMode) {
-                        printf("Major:%d, Minor:%d\n", info->major, info->minor);
-                        printf("UUID(%d):%s\n", strlen(info->uuid), info->uuid);
+        for (std::vector<ad_structure*>::iterator it = event.data.begin(); it != event.data.end(); ++it) {
+            ad_structure& ads = *(*it);
+            if (ads.type == 0xff) {
+                if(hcidumpDebugMode)
+                    printf("ManufacturerData(%d bytes): ", ads.length);
+                if (ads.length >= MIN_MANUFACTURER_DATA_SIZE) {
+                    if(hcidumpDebugMode) {
+                        for (int i = 0; i < ads.length; ++i) {
+                            printf("%x", ads.data[i]);
+                        }
+                        printf("\n");
                     }
-
+                    // Pull out the beacon info
+                    info = new beacon_info;
+                    extractBeaconInfo(ads, info);
+                    if(hcidumpDebugMode) {
+                        printf("Major:%d, Minor:%d\n", info->major, info->minor);
+                        printf("UUID(%ld):%s\n", strlen(info->uuid), info->uuid);
+                    }
+                    // Free the ad_structure.data
+                    for(int n = 0; n < event.data.size(); n ++) {
+                        ad_structure* ads = event.data[n];
+                        free(ads);
+                    }
                     return (*callback)(info);
                 }
+                if(hcidumpDebugMode)
+                    printf("\n");
             }
         }
         return false;
@@ -756,7 +807,7 @@ int scan_frames(int32_t device, beacon_event callback) {
     return scan_for_ad_events(device, wrapper);
 }
 
-int32_t scan_for_ad_events(int32_t device, ad_event callback) {
+int32_t scan_for_ad_events(int32_t device, std::function<bool(ad_data&)> callback) {
     unsigned long flags = 0;
 
     flags |= DUMP_TSTAMP;
@@ -765,4 +816,21 @@ int32_t scan_for_ad_events(int32_t device, ad_event callback) {
     int socketfd = open_socket(device);
     printf("Scanning hci%d, socket=%d, hcidumpDebugMode=%d\n", device, socketfd, hcidumpDebugMode);
     return process_frames(device, socketfd, -1, flags, callback);
+}
+
+int32_t scan_for_ad_events_inline(int32_t device, std::function<bool(ad_data_inline&)> callback) {
+    // Lambda wrapper around the ad_data& based callback that inlines the vector<ad_structure*> data
+    std::function<bool(ad_data &)> wrapper = [&](ad_data &event) {
+        ad_data_inline* event_inline = toInline(event);
+        if(hcidumpDebugMode) {
+            printf("HCI:ad_data:{time=%ld, rssi=%d, count=%d}\n", event_inline->time, event_inline->rssi,
+                   event_inline->count);
+            printf("\tHCI:AD(%d:%d) vs inline(%d:%d)\n", event.data[0]->type, event.data[0]->length,
+                   event_inline->data[0].type, event_inline->data[0].length);
+        }
+        bool stop = callback(*event_inline);
+        free(event_inline);
+        return stop;
+    };
+    return scan_for_ad_events(device, wrapper);
 }
