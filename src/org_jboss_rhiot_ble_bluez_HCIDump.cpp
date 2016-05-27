@@ -1,12 +1,12 @@
 #include <string.h>
 #include <stdlib.h>
-#include "org_jboss_rhiot_beacon_bluez_HCIDump.h"
+#include "org_jboss_rhiot_ble_bluez_HCIDump.h"
 #include "hcidumpinternal.h"
 #include <chrono>
 #include <thread>
 using namespace std;
 
-JavaVM *theVM;
+extern JavaVM *theVM;
 static jboolean useAdData = true;
 // the beacon_info pointer shared with java as a direct ByteBuffer when using the beacon oriented scanner
 static beacon_info *javaBeaconInfo;
@@ -14,24 +14,15 @@ static beacon_info *javaBeaconInfo;
 static ad_data_inline *javaAdData;
 
 static jobject byteBufferObj;
-// a cached object handle to the org.jboss.summit2015.beacon.bluez.HCIDump class
+// a cached object handle to the org.jboss.summit2015.ble.bluez.HCIDump class
 static jclass hcidumpClass;
 // The JNIEnv passed to the initBuffer native method
 static JNIEnv *javaEnv = nullptr;
 static jmethodID eventNotification;
 
 // The callback for the
-extern "C" bool beacon_event_callback_to_java(beacon_info * info);
-extern "C" bool ad_event_callback_to_java(ad_data_inline& info);
-
-/**
- * The shared library load callback to set the JavaVM pointer
- */
-JNIEXPORT jint JNI_OnLoad(JavaVM *vm, void *reserved) {
-    theVM = vm;
-    printf("JNI_OnLoad, requesting JNI_VERSION_1_8\n");
-    return JNI_VERSION_1_8;
-}
+extern "C" bool ble_event_callback_to_java(beacon_info * info);
+extern "C" bool ble_ad_event_callback_to_java(ad_data_inline& info);
 
 /**
  * Called by the scanner thread entry points to attach the thread to the JavaVM and allocate the
@@ -77,7 +68,7 @@ static void eventGenerator() {
         chrono::milliseconds now = chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now().time_since_epoch());
         info.count ++;
         info.time = now.count();
-        beacon_event_callback_to_java(&info);
+        ble_event_callback_to_java(&info);
     }
 }
 
@@ -94,14 +85,14 @@ static void runScanner(int device) {
     while(waiting)
         this_thread::yield();
     if(useAdData)
-        scan_for_ad_events_inline(device, ad_event_callback_to_java);
+        scan_for_ad_events_inline(device, ble_ad_event_callback_to_java);
     else
-        scan_frames(device, beacon_event_callback_to_java);
+        scan_frames(device, ble_event_callback_to_java);
 }
 
-JNIEXPORT void JNICALL Java_org_jboss_rhiot_beacon_bluez_HCIDump_allocScanner
+JNIEXPORT void JNICALL Java_org_jboss_rhiot_ble_bluez_HCIDump_allocScanner
         (JNIEnv *env, jclass clazz, jobject bb, jint device, jboolean isGeneral) {
-    printf("begin Java_org_jboss_rhiot_beacon_bluez_HCIDump_allocScanner(%x,%x,%x)\n", env, clazz, bb);
+    printf("begin Java_org_jboss_rhiot_ble_bluez_HCIDump_allocScanner(%x,%x,%x)\n", env, clazz, bb);
     // Create global references to the ByteBuffer and HCIDump class for use in other native threads
     byteBufferObj = (jobject) env->NewGlobalRef(bb);
     hcidumpClass = (jclass) env->NewGlobalRef(clazz);
@@ -122,22 +113,22 @@ JNIEXPORT void JNICALL Java_org_jboss_rhiot_beacon_bluez_HCIDump_allocScanner
 #endif
     tid = t.get_id();
     t.detach();
-    printf("end Java_org_jboss_rhiot_beacon_bluez_HCIDump_allocScanner, tid=%x, hcidumpClassRef=%x, eventNotification=%x\n", tid, hcidumpClass, eventNotification);
+    printf("end Java_org_jboss_rhiot_ble_bluez_HCIDump_allocScanner, tid=%x, hcidumpClassRef=%x, eventNotification=%x\n", tid, hcidumpClass, eventNotification);
 }
 
-JNIEXPORT void JNICALL Java_org_jboss_rhiot_beacon_bluez_HCIDump_freeScanner
+JNIEXPORT void JNICALL Java_org_jboss_rhiot_ble_bluez_HCIDump_freeScanner
         (JNIEnv *env, jclass clazz) {
-    printf("begin Java_org_jboss_rhiot_beacon_bluez_HCIDump_freeScanner(%x,%x)\n", env, clazz);
+    printf("begin Java_org_jboss_rhiot_ble_bluez_HCIDump_freeScanner(%x,%x)\n", env, clazz);
     javaEnv->DeleteGlobalRef(hcidumpClass);
     javaEnv->DeleteGlobalRef(byteBufferObj);
 }
 
 /*
- * Class:     org_jboss_rhiot_beacon_bluez_HCIDump
+ * Class:     org_jboss_rhiot_ble_bluez_HCIDump
  * Method:    enableDebugMode
  * Signature: (Z)V
  */
-JNIEXPORT void JNICALL Java_org_jboss_rhiot_beacon_bluez_HCIDump_enableDebugMode
+JNIEXPORT void JNICALL Java_org_jboss_rhiot_ble_bluez_HCIDump_enableDebugMode
         (JNIEnv *env, jclass clazz, jboolean flag) {
 
     hcidumpDebugMode = flag;
@@ -149,9 +140,9 @@ JNIEXPORT void JNICALL Java_org_jboss_rhiot_beacon_bluez_HCIDump_enableDebugMode
  * indicator as returned by the event notification callback return value.
 */
 static long eventCount = 0;
-extern "C" bool beacon_event_callback_to_java(beacon_info * info) {
+extern "C" bool ble_event_callback_to_java(beacon_info * info) {
     if(hcidumpDebugMode) {
-        printf("beacon_event_callback_to_java(%ld: %s, code=%d, time=%lld)\n", eventCount, info->uuid, info->code,
+        printf("ble_event_callback_to_java(%ld: %s, code=%d, time=%lld)\n", eventCount, info->uuid, info->code,
                info->time);
     }
     eventCount ++;
@@ -172,9 +163,9 @@ static inline const char* toHexString(uint8_t *data, uint8_t length) {
     *loc = 0;
     return buffer;
 }
-extern "C" bool ad_event_callback_to_java(ad_data_inline& info) {
+extern "C" bool ble_ad_event_callback_to_java(ad_data_inline& info) {
     if(hcidumpDebugMode) {
-        printf("ad_event_callback_to_java(%ld: %s, time=%lld)\n", eventCount, toHexString(info.bdaddr, 6), info.time);
+        printf("ble_ad_event_callback_to_java(%ld: %s, time=%lld)\n", eventCount, toHexString(info.bdaddr, 6), info.time);
     }
 
     eventCount ++;
