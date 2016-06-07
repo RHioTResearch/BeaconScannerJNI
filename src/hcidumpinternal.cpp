@@ -41,6 +41,10 @@
 #include <ctype.h>
 
 extern "C" {
+#ifdef LEGACY_BLUEZ
+// The bluetooth.h header uses an invalid syntax for c++-std11 to map it to __typeof__
+#define typeof __typeof__
+#endif
 #include "parser.h"
 #include "sdp.h"
 #include <bluetooth.h>
