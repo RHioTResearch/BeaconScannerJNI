@@ -39,6 +39,7 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <ctype.h>
+#include <condition_variable>
 
 extern "C" {
 #ifdef LEGACY_BLUEZ
@@ -66,6 +67,8 @@ enum {
 
 // A stop flag
 bool stop_scan_frames = false;
+std::mutex exitLoopMutex;
+std::condition_variable exitLoopCV;
 
 // Debug mode flag
 bool hcidumpDebugMode = false;
@@ -686,10 +689,11 @@ int process_frames(int dev, int sock, int fd, unsigned long flags, std::function
         int i, n = poll(fds, nfds, 5000);
 
         if (n <= 0) {
-            if(stop_scan_frames)
-                break;
             continue;
         }
+        // Check for external stop flag
+        if(stop_scan_frames)
+            break;
 
         for (i = 0; i < nfds; i++) {
             if (fds[i].revents & (POLLHUP | POLLERR | POLLNVAL)) {
@@ -760,6 +764,9 @@ int process_frames(int dev, int sock, int fd, unsigned long flags, std::function
             printf("End do_parse(info.time=%lld, ad.count=%ld)\n", time, event.data.size());
         }
     }
+    printf("Exiting hcidumpinternal scan loop\n");
+    std::lock_guard<std::mutex> exitGuard(exitLoopMutex);
+    exitLoopCV.notify_all();
 
     free(buf);
     free(ctrl);

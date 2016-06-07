@@ -4,9 +4,13 @@
 #include "hcidumpinternal.h"
 #include <chrono>
 #include <thread>
+#include <mutex>
+#include <condition_variable>
+
 using namespace std;
 
 extern JavaVM *theVM;
+//
 static jboolean useAdData = true;
 // the beacon_info pointer shared with java as a direct ByteBuffer when using the beacon oriented scanner
 static beacon_info *javaBeaconInfo;
@@ -19,6 +23,14 @@ static jclass hcidumpClass;
 // The JNIEnv passed to the initBuffer native method
 static JNIEnv *javaEnv = nullptr;
 static jmethodID eventNotification;
+
+// A mutex to isolate the event thread from calls to freeScanner/allocScanner
+static mutex allocMutex;
+
+// A stop flag from hcidumpinternal.cpp
+extern bool stop_scan_frames;
+extern std::mutex exitLoopMutex;
+extern std::condition_variable exitLoopCV;
 
 // The callback for the
 extern "C" bool ble_event_callback_to_java(beacon_info * info);
@@ -92,6 +104,7 @@ static void runScanner(int device) {
 
 JNIEXPORT void JNICALL Java_org_jboss_rhiot_ble_bluez_HCIDump_allocScanner
         (JNIEnv *env, jclass clazz, jobject bb, jint device, jboolean isGeneral) {
+    std::lock_guard<mutex> guard(allocMutex);
     printf("begin Java_org_jboss_rhiot_ble_bluez_HCIDump_allocScanner(%x,%x,%x)\n", env, clazz, bb);
     // Create global references to the ByteBuffer and HCIDump class for use in other native threads
     byteBufferObj = (jobject) env->NewGlobalRef(bb);
@@ -109,6 +122,7 @@ JNIEXPORT void JNICALL Java_org_jboss_rhiot_ble_bluez_HCIDump_allocScanner
     thread t(eventGenerator, device);
 #else
     // Run the scanner
+    stop_scan_frames = false;
     thread t(runScanner, device);
 #endif
     tid = t.get_id();
@@ -118,9 +132,19 @@ JNIEXPORT void JNICALL Java_org_jboss_rhiot_ble_bluez_HCIDump_allocScanner
 
 JNIEXPORT void JNICALL Java_org_jboss_rhiot_ble_bluez_HCIDump_freeScanner
         (JNIEnv *env, jclass clazz) {
+    std::lock_guard<mutex> guard(allocMutex);
     printf("begin Java_org_jboss_rhiot_ble_bluez_HCIDump_freeScanner(%x,%x)\n", env, clazz);
+    // Notify the scanner loop it should exit and wait for it to signal it has done so
+    std::unique_lock<std::mutex> exitLock(exitLoopMutex);
+    stop_scan_frames = true;
+    exitLoopCV.wait(exitLock);
+    printf("notified that scan loop has exited\n");
+
+    // Clean up JVM data
     javaEnv->DeleteGlobalRef(hcidumpClass);
     javaEnv->DeleteGlobalRef(byteBufferObj);
+    javaEnv = nullptr;
+    printf("end Java_org_jboss_rhiot_ble_bluez_HCIDump_freeScanner(%x,%x)\n", env, clazz);
 }
 
 /*
